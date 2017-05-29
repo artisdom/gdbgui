@@ -196,7 +196,7 @@ How Does it Work?
 1. The `pygdbmi library <https://github.com/cs01/pygdbmi>`__ manages gdb as a subprocess, and returns key/value pairs (dictionaries).
 2. The `Flask-SocketIO <https://flask-socketio.readthedocs.io/en/latest/>`__ server (Flask+websockets) serves the webpage and provides realtime interactivity.  http/websocket endpoints are available for the browser. Each websocket connection (browser tab) runs a pygdbmi-managed instance of gdb. A thread is spawned constantly read and forward output from gdb to the browser.
 3. The `pypugjs <https://github.com/matannoam/pypugjs>`__ template engine is used to reduce html LOC
-4. The browser manages its ui and state with the plain JavaScript library `stator <https://github.com/cs01/stator>`__
+4. The browser manages its ui and state with the plain JavaScript and virtual DOM `maquette <maquettejs.org>`__
 
 ``gdbgui`` was designed to be easily hackable and extendable. There is
 no build system necessary to run or develop this app.

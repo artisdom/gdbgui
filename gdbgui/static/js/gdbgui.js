@@ -260,9 +260,9 @@ const Modal = {
  * at the top of the page
  */
 const StatusBar = {
-    el: $('#status'),
+    // el: $('#status'),
     init: function(){
-        projector.replace(document.getElementById('status'), StatusBar._render)
+        new Reactor('#status', StatusBar.render, {maquette: true})
     },
     /**
      * If user runs a command, show warning message if gdb does not respond
@@ -271,39 +271,33 @@ const StatusBar = {
      */
     waiting_timeout: null,
     /**
-     * Render a new status
-     * @param status_str: The string to render
-     * @param error: Whether this string relates to an error condition. If true,
-     *                  a red label appears
+     * Update the status state, and clear timeout to display if no response was received
      */
-    render: function(status_str, type='info', error=false, warn=false){
-        if(status_str){
-            state.set('status', {'text': status_str, 'type': type})
-            projector.scheduleRender()
+    update_status: function(status){
+        clearTimeout(StatusBar.waiting_timeout)
+        if(status.text){
+            state.set('status', status)
         }
     },
-    _render: function(){
+    render: function(){
         let status = state.get('status')
         , text = status.text
         , error = status.type === 'error'
         , warn = status.type === 'warn'
 
-        clearTimeout(StatusBar.waiting_timeout)
+        if(error || warn){
+            // also add to the console if error/warning
+            GdbConsoleComponent.add(text, true)
+        }
+
         let prefix = ''
         if(error){
             prefix = "<span class='label label-danger'>error</span>&nbsp;"
         }else if (warn){
             prefix = "<span class='label label-warning'>warning</span>&nbsp;"
         }
-        // projector
-        // StatusBar.el.html(prefix + status_str)
 
-        // also add to the console if error/warning
-        if(error || warn){
-            GdbConsoleComponent.add(text, true)
-        }
-        return h('span', text)
-
+        return h('span', {innerHTML: prefix + text})
     },
     /**
      * When waiting for a response render this, and set a timeout.
@@ -312,11 +306,11 @@ const StatusBar = {
      */
     render_waiting: function(){
         const WAIT_TIME_SEC = 3
-        state.set('status', {text: ANIMATED_REFRESH_ICON})
+        StatusBar.update_status({text: ANIMATED_REFRESH_ICON})
         StatusBar.waiting_timeout = setTimeout(
             () => {
                 let warn_text = `It's been over ${WAIT_TIME_SEC} seconds. Is an inferior program loaded and running?`
-                state.set('status', {text: warn_text, type: 'warn'})
+                StatusBar.update_status({text: warn_text, type: 'warn'})
                 GdbConsoleComponent.add(warn_text, true)
                 GdbConsoleComponent.scroll_to_bottom()
             },
@@ -328,9 +322,9 @@ const StatusBar = {
      */
     render_ajax_error_msg: function(response){
         if (response.responseJSON && response.responseJSON.message){
-            state.set('status', {text: _.escape(response.responseJSON.message), type: 'error'})
+            StatusBar.update_status({text: _.escape(response.responseJSON.message), type: 'error'})
         }else{
-            state.set('status', {text: `${response.statusText} (${response.status} error)`, type: 'error'})
+            StatusBar.update_status({text: `${response.statusText} (${response.status} error)`, type: 'error'})
         }
     },
     /**
@@ -355,7 +349,7 @@ const StatusBar = {
             let err_text_array = Util.get_err_text_from_mi_err_response(mi_obj)
             status = status.concat(err_text_array)
         }
-        state.set('status', {text: status.join(', '), type: error ? 'error' : 'info'})
+        StatusBar.update_status({text: status.join(', '), type: error ? 'error' : 'info'})
     }
 }
 
@@ -438,7 +432,7 @@ const GdbApi = {
         });
 
         GdbApi.socket.on('error_running_gdb_command', function(data) {
-            state.set('status', {text: `Error occurred on server when running gdb command: ${data.message}`, type: 'error'})
+            StatusBar.update_status({text: `Error occurred on server when running gdb command: ${data.message}`, type: 'error'})
         });
 
         GdbApi.socket.on('gdb_pid', function(gdb_pid) {
@@ -1718,7 +1712,7 @@ const BinaryLoader = {
         var binary_and_args = _.trim(BinaryLoader.el.val())
 
         if (_.trim(binary_and_args) === ''){
-            state.set('status', {text: 'enter a binary path and arguments', type:'error'})
+            StatusBar.update_status({text: 'enter a binary path and arguments', type:'error'})
             return
         }
 

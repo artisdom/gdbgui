@@ -25,6 +25,7 @@
 
  /* global state */
  /* global Reactor */
+ /* global maquette */
  /* global Awesomplete */
  /* global Split */
  /* global io */
@@ -32,7 +33,7 @@
  /* global debug */
  /* global initial_data */
 
-window.state = (function ($, _, state, Reactor, Awesomplete, Split, io, moment, debug, initial_data) {
+window.state = (function ($, _, state, Reactor, maquette, Awesomplete, Split, io, moment, debug, initial_data) {
 "use strict";
 
 /**
@@ -46,6 +47,8 @@ const ENTER_BUTTON_NUM = 13
     , COMMA_BUTTON_NUM = 188
     , DATE_FORMAT = 'dddd, MMMM Do YYYY, h:mm:ss a'
     , ANIMATED_REFRESH_ICON = "<span class='glyphicon glyphicon-refresh glyphicon-refresh-animate'></span>"
+    , h = maquette.h
+    , projector =  maquette.createProjector()
 
 // print to console if debug is true
 let debug_print
@@ -161,6 +164,9 @@ const initial_state = {
     gdb_pid: undefined,
     can_fetch_register_values: true,  // set to false if using Rust and gdb v7.12.x (see https://github.com/cs01/gdbgui/issues/64)
 
+    // status bar text
+    status: {text: 'GDB is waiting to run a command', type: 'info'},  // type can be 'info', 'warning', 'error'
+
     // preferences
     // syntax highlighting
     themes: initial_data.themes,
@@ -255,6 +261,9 @@ const Modal = {
  */
 const StatusBar = {
     el: $('#status'),
+    init: function(){
+        projector.replace(document.getElementById('status'), StatusBar._render)
+    },
     /**
      * If user runs a command, show warning message if gdb does not respond
      * in a timely manner. Set a timeout, and store it here. Remove it when gdb
@@ -267,7 +276,18 @@ const StatusBar = {
      * @param error: Whether this string relates to an error condition. If true,
      *                  a red label appears
      */
-    render: function(status_str, error=false, warn=false){
+    render: function(status_str, type='info', error=false, warn=false){
+        if(status_str){
+            state.set('status', {'text': status_str, 'type': type})
+            projector.scheduleRender()
+        }
+    },
+    _render: function(){
+        let status = state.get('status')
+        , text = status.text
+        , error = status.type === 'error'
+        , warn = status.type === 'warn'
+
         clearTimeout(StatusBar.waiting_timeout)
         let prefix = ''
         if(error){
@@ -275,12 +295,14 @@ const StatusBar = {
         }else if (warn){
             prefix = "<span class='label label-warning'>warning</span>&nbsp;"
         }
-        StatusBar.el.html(prefix + status_str)
+        // projector
+        // StatusBar.el.html(prefix + status_str)
 
         // also add to the console if error/warning
         if(error || warn){
-            GdbConsoleComponent.add(status_str, true)
+            GdbConsoleComponent.add(text, true)
         }
+        return h('span', text)
 
     },
     /**
@@ -290,11 +312,11 @@ const StatusBar = {
      */
     render_waiting: function(){
         const WAIT_TIME_SEC = 3
-        StatusBar.render(ANIMATED_REFRESH_ICON)
+        state.set('status', {text: ANIMATED_REFRESH_ICON})
         StatusBar.waiting_timeout = setTimeout(
             () => {
                 let warn_text = `It's been over ${WAIT_TIME_SEC} seconds. Is an inferior program loaded and running?`
-                StatusBar.render(warn_text, false, true)
+                state.set('status', {text: warn_text, type: 'warn'})
                 GdbConsoleComponent.add(warn_text, true)
                 GdbConsoleComponent.scroll_to_bottom()
             },
@@ -306,9 +328,9 @@ const StatusBar = {
      */
     render_ajax_error_msg: function(response){
         if (response.responseJSON && response.responseJSON.message){
-            StatusBar.render(_.escape(response.responseJSON.message), true)
+            state.set('status', {text: _.escape(response.responseJSON.message), type: 'error'})
         }else{
-            StatusBar.render(`${response.statusText} (${response.status} error)`, true)
+            state.set('status', {text: `${response.statusText} (${response.status} error)`, type: 'error'})
         }
     },
     /**
@@ -333,9 +355,10 @@ const StatusBar = {
             let err_text_array = Util.get_err_text_from_mi_err_response(mi_obj)
             status = status.concat(err_text_array)
         }
-        StatusBar.render(status.join(', '), error)
+        state.set('status', {text: status.join(', '), type: error ? 'error' : 'info'})
     }
 }
+
 
 /**
  * A component to mimicks the gdb console.
@@ -415,12 +438,12 @@ const GdbApi = {
         });
 
         GdbApi.socket.on('error_running_gdb_command', function(data) {
-            StatusBar.render(`Error occurred on server when running gdb command: ${data.message}`, true)
+            state.set('status', {text: `Error occurred on server when running gdb command: ${data.message}`, type: 'error'})
         });
 
         GdbApi.socket.on('gdb_pid', function(gdb_pid) {
             state.set('gdb_pid', gdb_pid)
-            StatusBar.render(`${state.get('interpreter')} process ${gdb_pid} is running for this tab`)
+            // GdbConsoleComponent.add(`${state.get('interpreter')} process ${gdb_pid} is running for this tab`)
         });
 
         GdbApi.socket.on('disconnect', function(){
@@ -1695,7 +1718,7 @@ const BinaryLoader = {
         var binary_and_args = _.trim(BinaryLoader.el.val())
 
         if (_.trim(binary_and_args) === ''){
-            StatusBar.render('enter a binary path and arguments', true)
+            state.set('status', {text: 'enter a binary path and arguments', type:'error'})
             return
         }
 
@@ -3096,6 +3119,7 @@ Split(['#middle', '#bottom'], {
 })
 
 // initialize components
+StatusBar.init()
 GlobalEvents.init()
 GdbApi.init()
 GdbCommandInput.init()
@@ -3125,5 +3149,6 @@ if(_.isString(initial_data.initial_binary_and_args) && _.trim(initial_data.initi
     BinaryLoader.set_target_app()
 }
 
+
 return state
-})(jQuery, _, state, Reactor, Awesomplete, Split, io, moment, debug, initial_data)
+})(jQuery, _, state, Reactor, maquette, Awesomplete, Split, io, moment, debug, initial_data)

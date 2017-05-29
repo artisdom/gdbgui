@@ -14,7 +14,8 @@ head
     - for theme in themes
         link(href='static/vendor/css/pygments/#{theme}.css', rel='stylesheet')
 
-    script(type="text/javascript" src='static/vendor/js/stator.min.js')
+    script(type="text/javascript" src='static/vendor/js/maquette.min-2.4.1.js')
+    script(type="text/javascript" src='static/vendor/js/stator.min-0.1.1.js')
     script(type="text/javascript" src='static/vendor/js/jquery.min.js')
     script(type="text/javascript" src='static/vendor/js/jquery.flot-0.8.3.min.js')
     script(type="text/javascript" src='static/vendor/js/bootstrap.min.js')
@@ -98,7 +99,7 @@ body(style='margin: 0; width: 100%; height: 100%;')
                         button.btn.btn-default#step_instruction_button(type='button', title="Step Instruction: Execute one machine instruction, stepping into function calls (keyboard shortcut: ,)") SI
 
                     div(style='white-space: nowrap; height: 1.8em;')
-                        span#status GDB is waiting to run a command
+                        span#status
 
 
                 div(style='height: 60px')

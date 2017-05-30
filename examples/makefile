@@ -1,5 +1,5 @@
 c: hello.c
-	gcc $^ -o c.a -std=c99
+	gcc $^ -o c.a -std=c99 -g
 	../gdbgui/backend.py c.a
 
 cpp: hello.cpp

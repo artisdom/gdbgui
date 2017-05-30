@@ -882,16 +882,18 @@ const Breakpoint = {
     },
 }
 
+
+new Reactor('#source_code_heading', ()=>state.get('rendered_source_file_fullname'))
+
 /**
  * The source code component
  */
 const SourceCode = {
     el_code_container: $('#code_container'),
-    el_title: $('#source_code_heading'),
     el_jump_to_line_input: $('#jump_to_line'),
     init: function(){
-
-        new Reactor('#code_table', SourceCode.render, {after_render: SourceCode.after_render})
+        // new Reactor('#code_table', SourceCode.render, {after_render: SourceCode.after_render, maquette: true})
+        new Reactor('#code_table', SourceCode.render, {maquette: true})
 
         $("body").on("click", ".srccode td.line_num", SourceCode.click_gutter)
         $("body").on("click", ".view_file", SourceCode.click_view_file)
@@ -901,6 +903,120 @@ const SourceCode = {
 
         window.addEventListener('event_inferior_program_exited', SourceCode.event_inferior_program_exited)
         window.addEventListener('event_inferior_program_running', SourceCode.event_inferior_program_running)
+    },
+    render: function(reactor){
+        SourceCode.set_theme_in_dom()
+
+        if(state.get('fullname_to_render') === null){
+            state.set('rendered_source_file_fullname', null)
+            return h('table#code_table.code', {afterUpdate: SourceCode.make_current_line_visible}, '')
+
+        }else if(!SourceCode.is_cached(state.get('fullname_to_render'))){
+            SourceCode.fetch_file(state.get('fullname_to_render'))
+            state.set('rendered_source_file_fullname', null)
+            return h('table#code_table.code',{afterUpdate: SourceCode.make_current_line_visible}, '')
+        }
+
+        let fullname = state.get('fullname_to_render')
+        , current_line_of_source_code = parseInt(state.get('current_line_of_source_code'))
+        , addr = state.get('current_assembly_address')
+
+        let f = _.find(state.get('cached_source_files'), i => i.fullname === fullname)
+        let source_code = f.source_code
+
+        // make sure desired line is within number of lines of source code
+        if(current_line_of_source_code > source_code.length){
+            SourceCode.el_jump_to_line_input.val(source_code.length)
+            state.set('current_line_of_source_code', source_code.length)
+        }else if (current_line_of_source_code <= 0){
+            SourceCode.el_jump_to_line_input.val(1)
+            state.set('current_line_of_source_code', 1)
+        }
+
+        SourceCode.show_modal_if_file_modified_after_binary(fullname)
+
+        let assembly = SourceCode.get_cached_assembly_for_file(fullname)
+            , line_num = 1
+            , rows = []
+            , bkpt_lines = Breakpoint.get_breakpoint_lines_for_file(state.get('fullname_to_render'))
+            , disabled_breakpoint_lines = Breakpoint.get_disabled_breakpoint_lines_for_file(state.get('fullname_to_render'))
+            , inferior_program_is_paused_in_this_file = _.isObject(state.get('paused_on_frame')) && state.get('paused_on_frame').fullname === fullname
+            , gdb_paused_line = inferior_program_is_paused_in_this_file ? parseInt(state.get('paused_on_frame').line) : 0
+
+        for (let line of source_code){
+            let assembly_for_line = SourceCode.get_assembly_maquette_for_line(true, assembly, line_num, addr)
+
+            rows.push(h('tr', {key: line_num, class: 'srccode', id: line_num === gdb_paused_line ? 'scroll_to_line' : ''},
+                h('td', {
+                    valign: 'top',
+                    class:'line_num',
+                    classes: {breakpoint: bkpt_lines.indexOf(line_num) !== -1,
+                              disabled_breakpoint: disabled_breakpoint_lines.indexOf(line_num) !== -1},
+                    'data-line': line_num,
+                    style: {width: '30px'}},
+                    line_num),
+
+                h('td', {valign: 'top', class:'loc', 'data-line': line_num}, [
+                    h('span', {
+                                key: line,
+                                class: 'wsp',
+                                classes: {paused_on_line: line_num === gdb_paused_line},
+                                innerHTML: line,
+                            }
+                        )
+                    ]),
+
+                h('td', {valign: 'top'}, assembly_for_line)
+
+            ))
+            line_num++
+        }
+        state.set('rendered_source_file_fullname', fullname)
+        return h('table#code_table.code', {afterUpdate: SourceCode.make_current_line_visible}, rows)
+    },
+    set_theme_in_dom: function(){
+        let code_container = SourceCode.el_code_container
+        , old_theme = code_container.data('theme')
+        , current_theme = state.get('current_theme')
+        if(state.get('themes').indexOf(current_theme) === -1){
+            // somehow an invalid theme got set, update with a valid one
+            state.set('current_theme', state.get('themese')[0])
+        }
+
+        if(old_theme !== current_theme){
+            code_container.removeClass(old_theme)
+            code_container.data('theme', current_theme)
+            code_container.addClass(current_theme)
+        }
+    },
+    after_render: function(reactor){
+        SourceCode.render_breakpoints()
+        SourceCode.highlight_paused_line_and_scrollto_line()
+        state.set('has_unrendered_assembly', false)
+    },
+    // re-render breakpoints on whichever file is loaded
+    render_breakpoints: function(){
+        document.querySelectorAll('.line_num.breakpoint').forEach(el => el.classList.remove('breakpoint'))
+        document.querySelectorAll('.line_num.disabled_breakpoint').forEach(el => el.classList.remove('disabled_breakpoint'))
+        if(_.isString(state.get('rendered_source_file_fullname'))){
+
+            let bkpt_lines = Breakpoint.get_breakpoint_lines_for_file(state.get('rendered_source_file_fullname'))
+            , disabled_breakpoint_lines = Breakpoint.get_disabled_breakpoint_lines_for_file(state.get('rendered_source_file_fullname'))
+
+            for(let bkpt_line of bkpt_lines){
+                let js_line = $(`td.line_num[data-line=${bkpt_line}]`)[0]
+                if(js_line){
+                    $(js_line).addClass('breakpoint')
+                }
+            }
+
+            for(let bkpt_line of disabled_breakpoint_lines){
+                let js_line = $(`td.line_num[data-line=${bkpt_line}]`)[0]
+                if(js_line){
+                    $(js_line).addClass('disabled_breakpoint')
+                }
+            }
+        }
     },
     event_inferior_program_exited: function(e){
         SourceCode.remove_line_highlights()
@@ -972,6 +1088,32 @@ const SourceCode = {
             ${instruction_content}
         </td>`
     },
+    get_assembly_maquette_for_line: function(show_assembly, assembly, line_num, addr){
+        let instruction_content = [],
+            func_and_addr_content = []
+
+        if(show_assembly && assembly[line_num]){
+
+            let instructions_for_this_line = assembly[line_num]
+
+            // collect all instructions for this line of code
+            for(let i of instructions_for_this_line){
+
+                let is_cur_addr = addr === i.address
+                , addr_link = Memory.make_addrs_into_links(i.address)
+                , instruction = Memory.make_addrs_into_links(i.inst)
+
+                instruction_content.push(h('span',{
+                                key: addr+i.inst+i.offset,
+                                style: '"white-space: nowrap;',
+                                classes: {current_assembly_command: is_cur_addr, assembly: !is_cur_addr},
+                                innerHTML: `${instruction} ${i['func-name']}+${i.offset} ${addr_link}<br>`,
+                                'data-addr': i.address,
+                            }))
+            }
+        }
+        return h('td', {key: line_num, valign: 'top', class:'assembly'}, instruction_content)
+    },
     /**
      * Show modal warning if user is trying to show a file that was modified after the binary was compiled
      */
@@ -989,127 +1131,8 @@ const SourceCode = {
             }
         }
     },
-    /**
-     * Render a cached source file
-     */
-    render_cached_source_file: function(fullname, source_code, scroll_to_line=1, addr=undefined){
-    },
     make_current_line_visible: function(){
         SourceCode.scroll_to_jq_selector($("#scroll_to_line"))
-    },
-    set_theme_in_dom: function(){
-        let code_container = SourceCode.el_code_container
-        , old_theme = code_container.data('theme')
-        , current_theme = state.get('current_theme')
-        if(state.get('themes').indexOf(current_theme) === -1){
-            // somehow an invalid theme got set, update with a valid one
-            state.set('current_theme', state.get('themese')[0])
-        }
-
-        if(old_theme !== current_theme){
-            code_container.removeClass(old_theme)
-            code_container.data('theme', current_theme)
-            code_container.addClass(current_theme)
-        }
-    },
-    should_render: function(reactor){
-        let fullname = state.get('fullname_to_render')
-        // don't re-render all the lines if they are already rendered.
-        // just update breakpoints and line highlighting
-        if(fullname === state.get('rendered_source_file_fullname') && !state.get('has_unrendered_assembly')) {
-            // we already rendered this file, and the assembly, so don't re-render it
-            SourceCode.highlight_paused_line_and_scrollto_line(fullname, state.get('current_line_of_source_code'), addr)
-            SourceCode.render_breakpoints()
-            SourceCode.make_current_line_visible()
-            return false
-        }
-        return true
-    },
-    render: function(reactor){
-        SourceCode.set_theme_in_dom()
-
-        if(state.get('fullname_to_render') === null){
-            state.set('rendered_source_file_fullname', null)
-            return ''
-        }else if(!SourceCode.is_cached(state.get('fullname_to_render'))){
-            SourceCode.fetch_file(state.get('fullname_to_render'))
-            state.set('rendered_source_file_fullname', null)
-            return ''
-        }
-
-        let fullname = state.get('fullname_to_render')
-        , current_line_of_source_code = parseInt(state.get('current_line_of_source_code'))
-        , addr = state.get('current_assembly_address')
-
-        let f = _.find(state.get('cached_source_files'), i => i.fullname === fullname)
-        let source_code = f.source_code
-
-        // make sure desired line is within number of lines of source code
-        if(current_line_of_source_code > source_code.length){
-            SourceCode.el_jump_to_line_input.val(source_code.length)
-            state.set('current_line_of_source_code', source_code.length)
-        }else if (current_line_of_source_code <= 0){
-            SourceCode.el_jump_to_line_input.val(1)
-            state.set('current_line_of_source_code', 1)
-        }
-
-        SourceCode.show_modal_if_file_modified_after_binary(fullname)
-
-        let assembly = SourceCode.get_cached_assembly_for_file(fullname)
-            , line_num = 1
-            , tbody = []
-
-        for (let line of source_code){
-            let assembly_for_line = SourceCode.get_assembly_html_for_line(true, assembly, line_num, addr)
-
-            tbody.push(`
-                <tr class='srccode'>
-                    <td valign="top" class='line_num' data-line=${line_num} style='width: 30px;'>
-                        <div>${line_num}</div>
-                    </td>
-
-                    <td valign="top" class='loc' data-line=${line_num}>
-                        <span class='wsp'>${line}</span>
-                    </td>
-
-                    ${assembly_for_line}
-                </tr>
-                `)
-            line_num++;
-        }
-
-        state.set('rendered_source_file_fullname', fullname)
-        SourceCode.el_title.text(fullname)
-        return tbody.join('')
-    },
-    after_render: function(reactor){
-        SourceCode.render_breakpoints()
-        SourceCode.highlight_paused_line_and_scrollto_line()
-        state.set('has_unrendered_assembly', false)
-    },
-    // re-render breakpoints on whichever file is loaded
-    render_breakpoints: function(){
-        document.querySelectorAll('.line_num.breakpoint').forEach(el => el.classList.remove('breakpoint'))
-        document.querySelectorAll('.line_num.disabled_breakpoint').forEach(el => el.classList.remove('disabled_breakpoint'))
-        if(_.isString(state.get('rendered_source_file_fullname'))){
-
-            let bkpt_lines = Breakpoint.get_breakpoint_lines_for_file(state.get('rendered_source_file_fullname'))
-            , disabled_breakpoint_lines = Breakpoint.get_disabled_breakpoint_lines_for_file(state.get('rendered_source_file_fullname'))
-
-            for(let bkpt_line of bkpt_lines){
-                let js_line = $(`td.line_num[data-line=${bkpt_line}]`)[0]
-                if(js_line){
-                    $(js_line).addClass('breakpoint')
-                }
-            }
-
-            for(let bkpt_line of disabled_breakpoint_lines){
-                let js_line = $(`td.line_num[data-line=${bkpt_line}]`)[0]
-                if(js_line){
-                    $(js_line).addClass('disabled_breakpoint')
-                }
-            }
-        }
     },
     /**
      * Scroll to a jQuery selection in the source code table
@@ -2731,7 +2754,7 @@ const Threads = {
                 , attrs = is_current_thread_being_rendered ? `class="select_frame pointer ${bold}"` : `class="select_thread_id pointer ${bold}" data-thread_id=${thread_id}`
                 , function_name =`
                 <span ${attrs} data-framenum=${s.level}>
-                    ${s.func}
+                    ${s.func} (${Memory.make_addrs_into_links(s.addr)})
                 </span>`
 
             table_data.push([function_name, `${s.file}:${s.line}`])

@@ -29,10 +29,11 @@
  /* global Split */
  /* global io */
  /* global moment */
+ /* global vis */
  /* global debug */
  /* global initial_data */
 
-window.state = (function ($, _, state, Reactor, Awesomplete, Split, io, moment, debug, initial_data) {
+window.state = (function ($, _, state, Reactor, Awesomplete, Split, io, moment, vis, debug, initial_data) {
 "use strict";
 
 /**
@@ -230,6 +231,7 @@ const initial_state = {
     // type of expression being created. Choices are: 'local' (autocreated local var), 'hover' (created when hovering in source coee), 'expr' (a "watch" expression )
     expr_type: null,
     expressions: [],  // array of dicts. Key is expression, value has various keys. See Expressions component.
+    selected_gdb_var_name: null,  // if user clicks on a local variable or expression store it here so Graph can be rendered
 }
 
 state.options.debug = debug
@@ -2157,6 +2159,12 @@ const Expressions = {
         }
         return undefined
     },
+    get_root_name_from_gdbvar_name: function(gdb_var_name){
+        return gdb_var_name.split('.')[0]
+    },
+    get_child_names_from_gdbvar_name: function(gdb_var_name){
+        return gdb_var_name.split('.').slice(1, gdb_var_name.length)
+    },
     /**
      * Get object from gdb variable name. gdb variable names are unique, and don't match
      * the expression being evaluated. If drilling down into fields of structures, the
@@ -2166,9 +2174,9 @@ const Expressions = {
      */
     get_obj_from_gdb_var_name: function(expressions, gdb_var_name){
         // gdb provides names in dot notation
-        let gdb_var_names = gdb_var_name.split('.'),
-            top_level_var_name = gdb_var_names[0],
-            children_names = gdb_var_names.slice(1, gdb_var_names.length)
+        // let gdb_var_names = gdb_var_name.split('.'),
+        let top_level_var_name = Expressions.get_root_name_from_gdbvar_name(gdb_var_name),
+            children_names = Expressions.get_child_names_from_gdbvar_name(gdb_var_name)
 
         let objs = expressions.filter(v => v.name === top_level_var_name)
 
@@ -2557,6 +2565,8 @@ const Expressions = {
         , obj = Expressions.get_obj_from_gdb_var_name(state.get('expressions'), gdb_var_name)
         , showing_children_in_ui = obj.show_children_in_ui
 
+        state.set('selected_gdb_var_name', gdb_var_name)
+
         if(showing_children_in_ui){
             // collapse
             Expressions.hide_children_in_ui(gdb_var_name)
@@ -2650,6 +2660,145 @@ const Expressions = {
         let expressions = state.get('expressions')
         _.remove(expressions, v => v.name === gdb_var_name)
         state.set('expressions', expressions)
+    },
+}
+
+const Graph = {
+    init: function(){
+        state.subscribe(Graph.render)
+        Graph.el = document.getElementById('graph')
+    },
+    network: null,  // initialize to null
+    render: function(){
+        let gdbvar = state.get('selected_gdb_var_name')
+        if(!gdbvar) {
+            Graph.el.innerHTML = ''
+            return
+        }
+        let expressions = state.get('expressions')
+        , root_gdb_var_name = Expressions.get_root_name_from_gdbvar_name(gdbvar)
+        , root_gdb_var_obj = Expressions.get_obj_from_gdb_var_name(expressions, root_gdb_var_name)
+
+        if(!root_gdb_var_obj){
+            Graph.el.innerHTML = ''
+            return
+        }
+
+        // TODO check if this var is already rendered in a graph, then just make deltas as necessary
+        // otherwise create entire new graph
+        if(true){
+            Graph.render_new_network(root_gdb_var_obj)
+        }else{
+            Graph.update_existing_network(root_gdb_var_obj)
+        }
+    },
+    _dfs: function(node, parent){
+        // Visit
+        Graph.nodes.add({id: node.name, label: node.value})
+        if(parent){
+            Graph.edges.add({id: node.name, from: parent.name, to: node.name, label: node.exp})
+        }
+
+        // Recurse over children
+        for(let child of node.children){
+            Graph._dfs(child, node)
+        }
+    },
+    render_new_network: function(root_gdb_var_obj){
+        Graph.nodes = new vis.DataSet();
+        Graph.edges = new vis.DataSet();
+        Graph._dfs(root_gdb_var_obj)
+
+        // create a network
+        var data = {
+            nodes: Graph.nodes,
+            edges: Graph.edges
+        };
+
+        const options = {
+            nodes: {
+                shape: 'box',
+                color: {background:'white'},
+            },
+            layout:{
+                randomSeed: 2,
+                hierarchical: {
+                    direction: "UD",
+                    sortMethod: "directed"
+                }
+            },
+            interaction: {dragNodes :false},
+            physics: {
+                enabled: false
+            },
+        }
+
+        Graph.network = new vis.Network(Graph.el, data, options)
+    },
+    update_existing_network: function(){
+        // TODO
+    },
+    addNode: function() {
+        try {
+            Graph.nodes.add({
+                id: document.getElementById('node-id').value,
+                label: document.getElementById('node-label').value
+            });
+        }
+        catch (err) {
+            alert(err);
+        }
+    },
+    updateNode: function() {
+        try {
+            Graph.nodes.update({
+                id: document.getElementById('node-id').value,
+                label: document.getElementById('node-label').value
+            });
+        }
+        catch (err) {
+            alert(err);
+        }
+    },
+    removeNode: function() {
+        try {
+            Graph.nodes.remove({id: document.getElementById('node-id').value});
+        }
+        catch (err) {
+            alert(err);
+        }
+    },
+    addEdge: function() {
+        try {
+            Graph.edges.add({
+                id: document.getElementById('edge-id').value,
+                from: document.getElementById('edge-from').value,
+                to: document.getElementById('edge-to').value
+            });
+        }
+        catch (err) {
+            alert(err);
+        }
+    },
+    updateEdge: function() {
+        try {
+            Graph.edges.update({
+                id: document.getElementById('edge-id').value,
+                from: document.getElementById('edge-from').value,
+                to: document.getElementById('edge-to').value
+            });
+        }
+        catch (err) {
+            alert(err);
+        }
+    },
+    removeEdge: function() {
+        try {
+            Graph.edges.remove({id: document.getElementById('edge-id').value});
+        }
+        catch (err) {
+            alert(err);
+        }
     },
 }
 
@@ -3333,6 +3482,7 @@ Registers.init()
 SourceFileAutocomplete.init()
 Memory.init()
 Expressions.init()
+Graph.init()
 HoverVar.init()
 Locals.init()
 Threads.init()
@@ -3351,4 +3501,4 @@ if(_.isString(initial_data.initial_binary_and_args) && _.trim(initial_data.initi
 }
 
 return state
-})(jQuery, _, state, Reactor, Awesomplete, Split, io, moment, debug, initial_data)
+})(jQuery, _, state, Reactor, Awesomplete, Split, io, moment, vis, debug, initial_data)

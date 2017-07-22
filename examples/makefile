@@ -13,3 +13,7 @@ go: hello.go
 rust: hello.rs
 	rustc -g hello.rs -o rust.a
 	../gdbgui/backend.py rust.a
+
+tree: tree.c
+	gcc $^ -g -o tree.a -std=c99
+	../gdbgui/backend.py tree.a
